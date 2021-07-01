@@ -1,7 +1,35 @@
 package kotlinx.coroutines.sync
 
 import kotlin.math.max
+import kotlin.time.Duration
+import kotlin.time.ExperimentalTime
 import kotlinx.coroutines.delay
+
+@OptIn(ExperimentalTime::class)
+public interface IntervalLimiter {
+    public suspend fun acquire(): Long
+    public suspend fun acquire(permits: Int): Long
+    public suspend fun tryAcquire():Boolean
+    public suspend fun tryAcquire(permits: Int):Boolean
+    public suspend fun tryAcquire(permits: Int, timeout:Duration):Boolean
+    public suspend fun tryAcquire(timeout:Duration):Boolean
+}
+
+@OptIn(ExperimentalTime::class)
+public fun intervalLimiter(eventsPerInterval: Double, interval: Duration):IntervalLimiter = IntervalLimiterImpl(eventsPerInterval, interval)
+
+@OptIn(ExperimentalTime::class)
+internal class IntervalLimiterImpl(
+    private val eventsPerInterval: Double,
+    private val interval: Duration
+) : IntervalLimiter {
+    override suspend fun acquire(): Long = TODO("not implemented")
+    override suspend fun acquire(permits: Int): Long = TODO("not implemented")
+    override suspend fun tryAcquire(): Boolean = TODO("not implemented")
+    override suspend fun tryAcquire(permits: Int): Boolean = TODO("not implemented")
+    override suspend fun tryAcquire(permits: Int, timeout: Duration): Boolean = TODO("not implemented")
+    override suspend fun tryAcquire(timeout: Duration): Boolean = TODO("not implemented")
+}
 
 /**
  * Limit throughput of events per second to be at most equal to the argument eventsPerSecond.
