@@ -1,14 +1,15 @@
-package kotlinx.coroutines.sync
+package se.jensim.kotlin.experiment.throughput
 
 import java.lang.IllegalArgumentException
-import kotlin.math.max
 import kotlin.time.Duration
 import kotlin.time.ExperimentalTime
-import kotlin.time.jvm.LongTimeMark
-import kotlin.time.jvm.LongTimeSource
-import kotlin.time.jvm.compareTo
-import kotlin.time.jvm.minus
+import se.jensim.kotlin.experiment.time.LongTimeMark
+import se.jensim.kotlin.experiment.time.LongTimeSource
+import se.jensim.kotlin.experiment.time.compareTo
+import se.jensim.kotlin.experiment.time.minus
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 @OptIn(ExperimentalTime::class)
 public interface IntervalLimiter {
@@ -21,12 +22,12 @@ public interface IntervalLimiter {
 }
 
 @OptIn(ExperimentalTime::class)
-public fun intervalLimiter(eventsPerInterval: Double, interval: Duration): IntervalLimiter =
+public fun intervalLimiter(eventsPerInterval: Int, interval: Duration): IntervalLimiter =
     IntervalLimiterImpl(eventsPerInterval, interval)
 
 @OptIn(ExperimentalTime::class)
 internal class IntervalLimiterImpl(
-    eventsPerInterval: Double,
+    eventsPerInterval: Int,
     interval: Duration
 ) : IntervalLimiter {
 
@@ -47,17 +48,17 @@ internal class IntervalLimiterImpl(
     private val eventSegment = _interval.div(eventsPerInterval)
 
     @Volatile
-    private var cursor: LongTimeMark = LongTimeSource.markNow()
+    private var intervalStartCursor: LongTimeMark = LongTimeSource.markNow()
 
     @Volatile
-    private var intervalStartCursor: LongTimeMark = cursor
+    private var cursor: LongTimeMark = intervalStartCursor + eventSegment
 
     @Volatile
-    private var intervalEndCursor: LongTimeMark = cursor.plus(_interval)
+    private var intervalEndCursor: LongTimeMark = intervalStartCursor.plus(_interval)
 
     override suspend fun acquire(): Long = acquire(permits = 1)
     override suspend fun acquire(permits: Int): Long {
-        if (permits > 0) throw IllegalArgumentException("You need to ask for at least zero permits")
+        if (permits < 0) throw IllegalArgumentException("You need to ask for at least zero permits")
 
         val now: LongTimeMark = LongTimeSource.markNow()
         val permitDuration = if (permits == 1) eventSegment else eventSegment.times(permits)
@@ -67,12 +68,8 @@ internal class IntervalLimiterImpl(
         }
         val sleep: Duration = (wakeUpTime.minus(now))
         val sleepMillis = sleep.inWholeMilliseconds
-        return if (sleepMillis > 0) {
-            delay(sleepMillis)
-            sleepMillis
-        } else {
-            0L
-        }
+        delay(sleepMillis)
+        return sleepMillis
     }
 
     override suspend fun tryAcquire(): Boolean = tryAcquireInternal()
@@ -82,7 +79,7 @@ internal class IntervalLimiterImpl(
 
     override suspend fun tryAcquire(timeout: Duration): Boolean = tryAcquireInternal(timeout = timeout)
     private suspend fun tryAcquireInternal(permits: Int = 1, timeout: Duration? = null): Boolean {
-        if (permits > 0) throw IllegalArgumentException("You need to ask for at least zero permits")
+        if (permits < 0) throw IllegalArgumentException("You need to ask for at least zero permits")
         val now: LongTimeMark = LongTimeSource.markNow()
 
         val timeoutEnd = if(timeout == null) now else now + timeout
@@ -113,7 +110,7 @@ internal class IntervalLimiterImpl(
      * Must be run inside the mutex.. This is the Danger Zone.
      */
     private fun getWakeUpTime(now: LongTimeMark, permitDuration: Duration): LongTimeMark {
-        return if (intervalEndCursor.hasNotPassedNow()) {
+        return if (intervalEndCursor < now) {
             // Active interval is in the past
             // Align start of interval with current point in time
             intervalStartCursor = now
@@ -128,7 +125,7 @@ internal class IntervalLimiterImpl(
             intervalEndCursor += _interval
             cursor = intervalStartCursor + permitDuration
             intervalStartCursor
-        } else if (intervalStartCursor.hasPassedNow()) {
+        } else if (intervalStartCursor > now) {
             // Active interval is in the future, and the current permit must be delayed
             cursor += permitDuration
             intervalStartCursor
@@ -159,49 +156,51 @@ public interface RateLimiter {
     public suspend fun acquire(permits: Int): Long
 }
 
-public fun rateLimiter(eventsPerSecond: Double): RateLimiter = RateLimiterImpl(eventsPerSecond)
+@OptIn(ExperimentalTime::class)
+public fun rateLimiter(eventsPerInterval: Int, interval:Duration): RateLimiter = RateLimiterImpl(eventsPerInterval,interval)
 
 private const val MAX_ALLOWED: Double = 1_000_000_000.0
 private const val MIN_ALLOWED: Double = 0.0000001
 
-internal class RateLimiterImpl(eventsPerSecond: Double) : RateLimiter {
+@OptIn(ExperimentalTime::class)
+internal class RateLimiterImpl(eventsPerInterval: Int, interval: Duration) : RateLimiter {
 
     private val mutex = Mutex()
-    private var next = 0L
-    private val delayInNanos: Long = (1_000_000_000L / eventsPerSecond).toLong()
+    private val _interval = Duration.nanoseconds(interval.inWholeNanoseconds)
+    private val permitDuration = _interval.div(eventsPerInterval)
+
+    @Volatile
+    private var cursor: LongTimeMark = LongTimeSource.markNow()
 
     init {
-        require(eventsPerSecond > MIN_ALLOWED) {
-            "eventsPerSecond must be a positive number"
+        require(interval.inWholeMilliseconds > 5) {
+            "Interval has to be at least 5 ms. The overhead of having locks and such in place if enough to render this moot."
         }
-        require(MAX_ALLOWED > eventsPerSecond) {
-            "The calculated delay in nanos became too small"
+        require(interval.inWholeDays <= 1){
+            "Interval has to be less than 1 day"
+        }
+        require(interval.inWholeNanoseconds / eventsPerInterval > 1){
+            "Interval segment is not allowed to be less than one"
         }
     }
 
     override suspend fun acquire(): Long {
-        return acquireDelay(delayInNanos)
+        return acquireDelay(permitDuration)
     }
 
     override suspend fun acquire(permits: Int): Long {
-        return acquireDelay(delayInNanos)
+        return acquireDelay(if(permits == 1) permitDuration else permitDuration.times(permits))
     }
 
-    private suspend fun acquireDelay(delayInNanos: Long): Long {
-        val now: Long = System.nanoTime()
-        val until = mutex.withLock {
-            max(next, now).also {
-                next = it + delayInNanos
-            }
+    private suspend fun acquireDelay(permitDuration: Duration): Long {
+        val now: LongTimeMark = LongTimeSource.markNow()
+        val wakeUpTime: LongTimeMark = mutex.withLock {
+            val base = if (cursor > now) cursor else now
+            cursor = base + permitDuration
+            base
         }
-        return if (until != now) {
-            val sleep = (until - now) / 1_000_000
-            if (sleep > 0) {
-                delay(sleep)
-            }
-            sleep
-        } else {
-            0L
-        }
+        val delayInMillis = (wakeUpTime - now).inWholeMilliseconds
+        delay(delayInMillis)
+        return delayInMillis
     }
 }

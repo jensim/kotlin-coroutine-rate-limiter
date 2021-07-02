@@ -1,4 +1,4 @@
-package kotlin.time.jvm
+package se.jensim.kotlin.experiment.time
 
 import kotlin.time.Duration
 import kotlin.time.ExperimentalTime
