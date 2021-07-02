@@ -5,12 +5,14 @@ import kotlin.time.Duration
 import kotlin.time.ExperimentalTime
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import org.junit.Ignore
 import org.junit.Test
 
 @OptIn(ExperimentalTime::class)
 internal class IntervalLimiterTest {
 
     @Test
+    @Ignore
     fun `run for one second`(): Unit = runBlocking {
         listOf(0.9, 1.0, 10.0, 100.0, 1000.0, 1200.0, 1990.0, 100_000.0).map { eventsPerSec ->
             launch {
@@ -31,6 +33,5 @@ internal class IntervalLimiterTest {
                 )
             }
         }
-
     }
 }

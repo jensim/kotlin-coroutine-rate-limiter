@@ -28,7 +28,6 @@ internal class IntervalLimiterImpl(
 ) : IntervalLimiter {
 
     private val _interval = Duration.nanoseconds(interval.inWholeNanoseconds)
-
     private val mutex = Mutex()
 
     @Volatile
@@ -41,19 +40,25 @@ internal class IntervalLimiterImpl(
 
     override suspend fun acquire(): Long = acquire(permits = 1)
     override suspend fun acquire(permits: Int): Long {
-        if (intervalEndCursor.hasNotPassedNow()){
-            // Time is moving faster than buffer of events delayed
-            // TODO Set up first interval on now
-            TODO()
-        }
-        if (cursor > intervalEndCursor){
-            // Cursor has moved into new interval
-            // Move cursors to match new interval
-            TODO()
-        }
-        if (intervalStartCursor.hasPassedNow()){
-            // Active interval is in the future, and the current permit must be delayed
-            TODO()
+        val permitDuration = eventSegment.times(permits)
+        mutex.withLock {
+            if (intervalEndCursor.hasNotPassedNow()){
+                // Time is moving faster than buffer of events delayed
+                // TODO Set up first interval on now
+                TODO()
+            } else if (cursor > intervalEndCursor){
+                // Cursor has moved into new interval
+                // Move cursors to match new interval
+                TODO()
+            } else if (intervalStartCursor.hasPassedNow()){
+                // Active interval is in the future, and the current permit must be delayed
+                TODO()
+            } else {
+                // Now and Cursor are within the active interval
+                // Only need to move the Cursor, nothing else
+                // No delay
+                cursor += permitDuration
+            }
         }
         TODO()
     }
