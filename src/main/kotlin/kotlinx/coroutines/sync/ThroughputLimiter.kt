@@ -30,8 +30,21 @@ internal class IntervalLimiterImpl(
     interval: Duration
 ) : IntervalLimiter {
 
+    init {
+        require(interval.inWholeMilliseconds > 5) {
+            "Interval has to be at least 5 ms. The overhead of having locks and such in place if enough to render this moot."
+        }
+        require(interval.inWholeDays <= 1){
+            "Interval has to be less than 1 day"
+        }
+        require(interval.inWholeNanoseconds / eventsPerInterval > 1){
+            "Interval segment is not allowed to be less than one"
+        }
+    }
+
     private val _interval = Duration.nanoseconds(interval.inWholeNanoseconds)
     private val mutex = Mutex()
+    private val eventSegment = _interval.div(eventsPerInterval)
 
     @Volatile
     private var cursor: LongTimeMark = LongTimeSource.markNow()
@@ -41,7 +54,6 @@ internal class IntervalLimiterImpl(
 
     @Volatile
     private var intervalEndCursor: LongTimeMark = cursor.plus(_interval)
-    private val eventSegment = _interval.div(eventsPerInterval)
 
     override suspend fun acquire(): Long = acquire(permits = 1)
     override suspend fun acquire(permits: Int): Long {
