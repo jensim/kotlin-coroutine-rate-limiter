@@ -4,9 +4,10 @@ import java.lang.IllegalArgumentException
 import kotlin.math.max
 import kotlin.time.Duration
 import kotlin.time.ExperimentalTime
-import kotlin.time.LongTimeMark
-import kotlin.time.LongTimeSource
-import kotlin.time.compareTo
+import kotlin.time.jvm.LongTimeMark
+import kotlin.time.jvm.LongTimeSource
+import kotlin.time.jvm.compareTo
+import kotlin.time.jvm.minus
 import kotlinx.coroutines.delay
 
 @OptIn(ExperimentalTime::class)
@@ -77,7 +78,7 @@ internal class IntervalLimiterImpl(
                 now
             }
         }
-        val sleep: Duration = (wakeUpTime - now)
+        val sleep: Duration = (wakeUpTime.minus(now))
         val sleepMillis = sleep.inWholeMilliseconds
         return if (sleepMillis > 0) {
             delay(sleepMillis)
