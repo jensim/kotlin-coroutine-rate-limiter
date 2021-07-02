@@ -3,6 +3,9 @@ package kotlinx.coroutines.sync
 import kotlin.math.max
 import kotlin.time.Duration
 import kotlin.time.ExperimentalTime
+import kotlin.time.TimeMark
+import kotlin.time.TimeSource
+import kotlin.time.compareTo
 import kotlinx.coroutines.delay
 
 @OptIn(ExperimentalTime::class)
@@ -20,15 +23,45 @@ public fun intervalLimiter(eventsPerInterval: Double, interval: Duration):Interv
 
 @OptIn(ExperimentalTime::class)
 internal class IntervalLimiterImpl(
-    private val eventsPerInterval: Double,
-    private val interval: Duration
+    eventsPerInterval: Double,
+    interval: Duration
 ) : IntervalLimiter {
-    override suspend fun acquire(): Long = TODO("not implemented")
-    override suspend fun acquire(permits: Int): Long = TODO("not implemented")
-    override suspend fun tryAcquire(): Boolean = TODO("not implemented")
-    override suspend fun tryAcquire(permits: Int): Boolean = TODO("not implemented")
-    override suspend fun tryAcquire(permits: Int, timeout: Duration): Boolean = TODO("not implemented")
-    override suspend fun tryAcquire(timeout: Duration): Boolean = TODO("not implemented")
+
+    private val _interval = Duration.nanoseconds(interval.inWholeNanoseconds)
+
+    private val mutex = Mutex()
+
+    @Volatile
+    private var cursor: TimeMark = TimeSource.Monotonic.markNow()
+    @Volatile
+    private var intervalStartCursor: TimeMark = cursor
+    @Volatile
+    private var intervalEndCursor: TimeMark = cursor.plus(_interval)
+    private val eventSegment = _interval.div(eventsPerInterval)
+
+    override suspend fun acquire(): Long = acquire(permits = 1)
+    override suspend fun acquire(permits: Int): Long {
+        if (intervalEndCursor.hasNotPassedNow()){
+            // Time is moving faster than buffer of events delayed
+            // TODO Set up first interval on now
+            TODO()
+        }
+        if (cursor > intervalEndCursor){
+            // Cursor has moved into new interval
+            // Move cursors to match new interval
+            TODO()
+        }
+        if (intervalStartCursor.hasPassedNow()){
+            // Active interval is in the future, and the current permit must be delayed
+            TODO()
+        }
+        TODO()
+    }
+    override suspend fun tryAcquire(): Boolean = tryAcquireInternal()
+    override suspend fun tryAcquire(permits: Int): Boolean = tryAcquireInternal(permits = permits)
+    override suspend fun tryAcquire(permits: Int, timeout: Duration): Boolean = tryAcquireInternal(permits = permits, timeout = timeout)
+    override suspend fun tryAcquire(timeout: Duration): Boolean = tryAcquireInternal(timeout = timeout)
+    private suspend fun tryAcquireInternal(permits: Int = 1, timeout: Duration? = null): Boolean = TODO("not implemented")
 }
 
 /**
