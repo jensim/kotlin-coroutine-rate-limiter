@@ -1,16 +1,15 @@
 package kotlinx.coroutines.sync
 
+import kotlin.test.assertTrue
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 import org.junit.Test
-import kotlin.test.*
-import kotlinx.coroutines.*
 
-internal class ThroughputLimiterTest {
-
-    private val testDelays:List<Double> = listOf(0.9, 1.0, 10.0, 100.0, 1000.0, 1200.0, 1990.0, 100_000.0)
+internal class RateLimiterTest {
 
     @Test(timeout = 2_000L)
     internal fun `run for one second`(): Unit = runBlocking {
-        testDelays.map { eventsPerSec ->
+        listOf(0.9, 1.0, 10.0, 100.0, 1000.0, 1200.0, 1990.0, 100_000.0).map { eventsPerSec ->
             launch {
                 val rateLimiter = rateLimiter(eventsPerSec)
                 val start = System.currentTimeMillis()
