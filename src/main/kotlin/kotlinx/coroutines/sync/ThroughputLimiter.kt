@@ -51,32 +51,7 @@ internal class IntervalLimiterImpl(
         val permitDuration = if (permits == 1) eventSegment else eventSegment.times(permits)
 
         val wakeUpTime: LongTimeMark = mutex.withLock {
-            if (intervalEndCursor.hasNotPassedNow()) {
-                // Active interval is in the past
-                // Align start of interval with current point in time
-                intervalStartCursor = now
-                intervalEndCursor = now + _interval
-                cursor = intervalStartCursor + permitDuration
-                // No delay
-                now
-            } else if (cursor > intervalEndCursor) {
-                // Cursor has moved into new interval
-                // Move cursors to match new interval
-                intervalStartCursor = intervalEndCursor
-                intervalEndCursor += _interval
-                cursor = intervalStartCursor + permitDuration
-                intervalStartCursor
-            } else if (intervalStartCursor.hasPassedNow()) {
-                // Active interval is in the future, and the current permit must be delayed
-                cursor += permitDuration
-                intervalStartCursor
-            } else {
-                // Now and Cursor are within the active interval
-                // Only need to move the Cursor, nothing else
-                // No delay
-                cursor += permitDuration
-                now
-            }
+            getWakeUpTime(now, permitDuration)
         }
         val sleep: Duration = (wakeUpTime.minus(now))
         val sleepMillis = sleep.inWholeMilliseconds
@@ -94,8 +69,65 @@ internal class IntervalLimiterImpl(
         tryAcquireInternal(permits = permits, timeout = timeout)
 
     override suspend fun tryAcquire(timeout: Duration): Boolean = tryAcquireInternal(timeout = timeout)
-    private suspend fun tryAcquireInternal(permits: Int = 1, timeout: Duration? = null): Boolean =
-        TODO("not implemented")
+    private suspend fun tryAcquireInternal(permits: Int = 1, timeout: Duration? = null): Boolean {
+        if (permits > 0) throw IllegalArgumentException("You need to ask for at least zero permits")
+        val now: LongTimeMark = LongTimeSource.markNow()
+
+        val timeoutEnd = if(timeout == null) now else now + timeout
+        // Early elimination without waiting for locks
+        if (timeoutEnd <= intervalStartCursor) {
+            // Start of current interval is in the future
+            return false
+        }
+
+        val permitDuration = if (permits == 1) eventSegment else eventSegment.times(permits)
+        val wakeUpTime: LongTimeMark = mutex.withLock {
+            // Late elimination with locks
+            // In case things changed while waiting for the lock
+            if (timeoutEnd <= intervalStartCursor) {
+                return false
+            }
+            getWakeUpTime(now, permitDuration)
+        }
+        val sleep: Duration = (wakeUpTime.minus(now))
+        val sleepMillis = sleep.inWholeMilliseconds
+        if (sleepMillis > 0) {
+            delay(sleepMillis)
+        }
+        return true
+    }
+
+    /**
+     * Must be run inside the mutex.. This is the Danger Zone.
+     */
+    private fun getWakeUpTime(now: LongTimeMark, permitDuration: Duration): LongTimeMark {
+        return if (intervalEndCursor.hasNotPassedNow()) {
+            // Active interval is in the past
+            // Align start of interval with current point in time
+            intervalStartCursor = now
+            intervalEndCursor = now + _interval
+            cursor = intervalStartCursor + permitDuration
+            // No delay
+            now
+        } else if (cursor > intervalEndCursor) {
+            // Cursor has moved into new interval
+            // Move cursors to match new interval
+            intervalStartCursor = intervalEndCursor
+            intervalEndCursor += _interval
+            cursor = intervalStartCursor + permitDuration
+            intervalStartCursor
+        } else if (intervalStartCursor.hasPassedNow()) {
+            // Active interval is in the future, and the current permit must be delayed
+            cursor += permitDuration
+            intervalStartCursor
+        } else {
+            // Now and Cursor are within the active interval
+            // Only need to move the Cursor, nothing else
+            // No delay
+            cursor += permitDuration
+            now
+        }
+    }
 }
 
 /**
