@@ -1,12 +1,11 @@
 package se.jensim.kotlin.experiment.throughput
 
-import java.lang.IllegalArgumentException
 import kotlin.time.Duration
 import kotlin.time.ExperimentalTime
-import se.jensim.kotlin.experiment.time.LongTimeMark
-import se.jensim.kotlin.experiment.time.LongTimeSource
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import se.jensim.kotlin.experiment.time.LongTimeMark
+import se.jensim.kotlin.experiment.time.LongTimeSource
 
 @OptIn(ExperimentalTime::class)
 public interface IntervalLimiter {
@@ -34,10 +33,10 @@ internal class IntervalLimiterImpl(
         require(interval.inWholeMilliseconds > 5) {
             "Interval has to be at least 5 ms. The overhead of having locks and such in place if enough to render this moot."
         }
-        require(interval.inWholeDays <= 1){
+        require(interval.inWholeDays <= 1) {
             "Interval has to be less than 1 day"
         }
-        require(interval.inWholeNanoseconds / eventsPerInterval > 1){
+        require(interval.inWholeNanoseconds / eventsPerInterval > 1) {
             "Interval segment is not allowed to be less than one"
         }
     }
@@ -79,11 +78,11 @@ internal class IntervalLimiterImpl(
     override suspend fun tryAcquire(timeout: Duration): Boolean = tryAcquireInternal(timeout = timeout)
     private suspend fun tryAcquireInternal(permits: Int = 1, timeout: Duration? = null): Boolean {
         if (permits < 0) throw IllegalArgumentException("You need to ask for at least zero permits")
-        val now: LongTimeMark = timeSource()
 
-        val timeoutEnd = if(timeout == null) now else now + timeout
+        val now: LongTimeMark = timeSource()
+        val timeoutEnd: LongTimeMark = if (timeout == null) now else now + timeout
         // Early elimination without waiting for locks
-        if (timeoutEnd <= intervalStartCursor) {
+        if (!shouldAllowOnTry(now, timeoutEnd)) {
             // Start of current interval is in the future
             return false
         }
@@ -92,7 +91,7 @@ internal class IntervalLimiterImpl(
         val wakeUpTime: LongTimeMark = mutex.withLock {
             // Late elimination with locks
             // In case things changed while waiting for the lock
-            if (timeoutEnd <= intervalStartCursor) {
+            if (!shouldAllowOnTry(now, timeoutEnd)) {
                 return false
             }
             getWakeUpTime(now, permitDuration)
@@ -121,11 +120,7 @@ internal class IntervalLimiterImpl(
         } else if (cursor > intervalEndCursor) {
             // Cursor has moved into new interval
             // Move cursors to match new interval
-            val cursorDiff = cursor - intervalEndCursor
-            var intervalSteps:Int = (cursorDiff.inWholeNanoseconds / _interval.inWholeNanoseconds).toInt()
-            if(cursorDiff.inWholeNanoseconds % _interval.inWholeNanoseconds > 9) intervalSteps++
-            val displacement = _interval.times(intervalSteps)
-
+            val displacement = getDisplacement()
             intervalEndCursor += displacement
             intervalStartCursor += displacement
             cursor += permitDuration
@@ -143,6 +138,28 @@ internal class IntervalLimiterImpl(
             cursor += permitDuration
             // println("Nothing special - cursor in first interval")
             now
+        }
+    }
+
+    private fun getDisplacement(): Duration {
+        val cursorDiff = cursor - intervalEndCursor
+        var intervalSteps: Int = (cursorDiff.inWholeNanoseconds / _interval.inWholeNanoseconds).toInt()
+        if (cursorDiff.inWholeNanoseconds % _interval.inWholeNanoseconds > 9) intervalSteps++
+        return _interval.times(intervalSteps)
+    }
+
+    private fun shouldAllowOnTry(now: LongTimeMark, timeoutEnd: LongTimeMark): Boolean {
+        return if (now > intervalEndCursor) {
+            // println("Stale interval")
+            return true
+        } else if (cursor > intervalEndCursor) {
+            val displacement: Duration = getDisplacement()
+            val newStart: LongTimeMark = intervalStartCursor + displacement
+            // println("Timeout end is going to be before the new start of period ${(timeoutEnd - newStart).inWholeNanoseconds}ns diff")
+            return timeoutEnd >= newStart
+        } else {
+            // println("Cursor doesn't need mod to eval")
+            timeoutEnd >= intervalStartCursor
         }
     }
 }
@@ -165,7 +182,8 @@ public interface RateLimiter {
 }
 
 @OptIn(ExperimentalTime::class)
-public fun rateLimiter(eventsPerInterval: Int, interval:Duration): RateLimiter = RateLimiterImpl(eventsPerInterval,interval)
+public fun rateLimiter(eventsPerInterval: Int, interval: Duration): RateLimiter =
+    RateLimiterImpl(eventsPerInterval, interval)
 
 @OptIn(ExperimentalTime::class)
 internal class RateLimiterImpl(
@@ -186,10 +204,10 @@ internal class RateLimiterImpl(
         require(interval.inWholeMilliseconds > 5) {
             "Interval has to be at least 5 ms. The overhead of having locks and such in place if enough to render this moot."
         }
-        require(interval.inWholeDays <= 1){
+        require(interval.inWholeDays <= 1) {
             "Interval has to be less than 1 day"
         }
-        require(interval.inWholeNanoseconds / eventsPerInterval > 1){
+        require(interval.inWholeNanoseconds / eventsPerInterval > 1) {
             "Interval segment is not allowed to be less than one"
         }
     }
@@ -199,7 +217,7 @@ internal class RateLimiterImpl(
     }
 
     override suspend fun acquire(permits: Int): Long {
-        return acquireDelay(if(permits == 1) permitDuration else permitDuration.times(permits))
+        return acquireDelay(if (permits == 1) permitDuration else permitDuration.times(permits))
     }
 
     private suspend fun acquireDelay(permitDuration: Duration): Long {
