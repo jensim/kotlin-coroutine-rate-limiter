@@ -6,19 +6,27 @@ import kotlin.time.TimeMark
 import kotlin.time.TimeSource
 
 @OptIn(ExperimentalTime::class)
-public class LongTimeMark(val nanos: Long) : TimeMark() {
-    override fun elapsedNow(): Duration = LongTimeSource.markNow() - this
-    override fun plus(duration: Duration): LongTimeMark = LongTimeMark(nanos + duration.inWholeNanoseconds)
+public abstract class LongTimeMark(val nanos:Long) : TimeMark() {
+
+    operator fun minus(other: LongTimeMark): Duration = Duration.nanoseconds(nanos - other.nanos)
+    override operator fun minus(duration: Duration): LongTimeMark = JvmNanoLongTimeMark(nanos - duration.inWholeNanoseconds)
+    override operator fun plus(duration: Duration): LongTimeMark = JvmNanoLongTimeMark(nanos + duration.inWholeNanoseconds)
+    override fun elapsedNow(): Duration = JvmNanoLongTimeSource.markNow() - this
+    operator fun compareTo(other: LongTimeMark): Int = nanos.compareTo(other.nanos)
 }
 
 @OptIn(ExperimentalTime::class)
-public object LongTimeSource : TimeSource {
-    override fun markNow(): LongTimeMark {
-        return LongTimeMark(System.nanoTime())
+private class JvmNanoLongTimeMark(nanos: Long) : LongTimeMark(nanos)
+
+@OptIn(ExperimentalTime::class)
+public interface LongTimeSource : TimeSource {
+    companion object {
+        fun markNow(): LongTimeMark = JvmNanoLongTimeSource.markNow()
     }
+    override fun markNow(): LongTimeMark
 }
 
 @OptIn(ExperimentalTime::class)
-public operator fun LongTimeMark.minus(other: LongTimeMark): Duration = Duration.nanoseconds(nanos - other.nanos)
-public operator fun LongTimeMark.compareTo(other: LongTimeMark): Int = nanos.compareTo(other.nanos)
-
+private object JvmNanoLongTimeSource : LongTimeSource {
+    override fun markNow(): LongTimeMark = JvmNanoLongTimeMark(System.nanoTime())
+}

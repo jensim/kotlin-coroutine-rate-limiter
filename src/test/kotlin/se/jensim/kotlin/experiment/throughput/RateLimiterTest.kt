@@ -1,29 +1,47 @@
 package se.jensim.kotlin.experiment.throughput
 
-import kotlin.test.assertTrue
+import kotlin.test.assertEquals
 import kotlin.time.Duration
 import kotlin.time.ExperimentalTime
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import org.junit.Test
+import org.junit.runner.RunWith
+import org.junit.runners.Parameterized
+import org.junit.runners.Parameterized.Parameters
+import se.jensim.kotlin.experiment.time.Delayer
+import se.jensim.kotlin.experiment.time.TestLongTimeSource
 
+
+@RunWith(Parameterized::class)
 @OptIn(ExperimentalTime::class)
-class RateLimiterTest {
+class RateLimiterTest(private val eventsPerInterval: Int) {
 
-    @Test(timeout = 2_000L)
-    fun run_for_one_second(): Unit = runBlocking {
-        listOf(1, 10, 100, 1000, 1200, 1990, 10_000).map { eventsPerInterval ->
-            launch {
-                val rateLimiter = rateLimiter(eventsPerInterval, Duration.seconds(1))
-                val start = System.currentTimeMillis()
-                (0..eventsPerInterval).forEach {
-                    rateLimiter.acquire()
-                }
-                val end = System.currentTimeMillis()
-                val diff = end - start
-                assertTrue(diff > 990, "Suspended for too short time. Only $diff ms has passed and 1000 is expected. Ran at a rate of $eventsPerInterval events per second.")
-                assertTrue(diff < 1200, "Suspended for too long time. $diff ms has passed and at most 1200 is expected. Ran at a rate of $eventsPerInterval events per second.")
-            }
+    companion object {
+
+        @JvmStatic
+        @Parameters
+        fun data(): Collection<Array<Any>> = listOf(1, 3, 10, 100, 1000).map { arrayOf(it) }
+    }
+
+    @Test
+    fun acquire(): Unit = runBlocking {
+        val delayer = Delayer()
+        val timeSource = TestLongTimeSource()
+        val rateLimiter = RateLimiterImpl(
+            eventsPerInterval = eventsPerInterval,
+            interval = Duration.seconds(1),
+            timeSource = timeSource::markNow,
+            delay = delayer::delay
+        )
+        (0..eventsPerInterval).forEach { delayMultiplier ->
+            delayer.reset()
+            rateLimiter.acquire()
+            val delaySum = delayer.getDelay()
+            val expectedDelay: Long = (1000L / eventsPerInterval) * delayMultiplier
+            assertEquals(
+                expectedDelay, delaySum,
+                "Failed for eventsPerInterval: $eventsPerInterval round #$delayMultiplier took $delaySum ms"
+            )
         }
     }
 }

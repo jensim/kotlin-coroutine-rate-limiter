@@ -5,9 +5,6 @@ import kotlin.time.Duration
 import kotlin.time.ExperimentalTime
 import se.jensim.kotlin.experiment.time.LongTimeMark
 import se.jensim.kotlin.experiment.time.LongTimeSource
-import se.jensim.kotlin.experiment.time.compareTo
-import se.jensim.kotlin.experiment.time.minus
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 
@@ -28,7 +25,9 @@ public fun intervalLimiter(eventsPerInterval: Int, interval: Duration): Interval
 @OptIn(ExperimentalTime::class)
 internal class IntervalLimiterImpl(
     eventsPerInterval: Int,
-    interval: Duration
+    interval: Duration,
+    val timeSource: () -> LongTimeMark = { LongTimeSource.markNow() },
+    val delay: suspend (Long) -> Unit = { kotlinx.coroutines.delay(it) }
 ) : IntervalLimiter {
 
     init {
@@ -48,10 +47,10 @@ internal class IntervalLimiterImpl(
     private val eventSegment = _interval.div(eventsPerInterval)
 
     @Volatile
-    private var intervalStartCursor: LongTimeMark = LongTimeSource.markNow()
+    private var intervalStartCursor: LongTimeMark = timeSource()
 
     @Volatile
-    private var cursor: LongTimeMark = intervalStartCursor + eventSegment
+    private var cursor: LongTimeMark = intervalStartCursor.minus(eventSegment)
 
     @Volatile
     private var intervalEndCursor: LongTimeMark = intervalStartCursor.plus(_interval)
@@ -60,7 +59,7 @@ internal class IntervalLimiterImpl(
     override suspend fun acquire(permits: Int): Long {
         if (permits < 0) throw IllegalArgumentException("You need to ask for at least zero permits")
 
-        val now: LongTimeMark = LongTimeSource.markNow()
+        val now: LongTimeMark = timeSource()
         val permitDuration = if (permits == 1) eventSegment else eventSegment.times(permits)
 
         val wakeUpTime: LongTimeMark = mutex.withLock {
@@ -80,7 +79,7 @@ internal class IntervalLimiterImpl(
     override suspend fun tryAcquire(timeout: Duration): Boolean = tryAcquireInternal(timeout = timeout)
     private suspend fun tryAcquireInternal(permits: Int = 1, timeout: Duration? = null): Boolean {
         if (permits < 0) throw IllegalArgumentException("You need to ask for at least zero permits")
-        val now: LongTimeMark = LongTimeSource.markNow()
+        val now: LongTimeMark = timeSource()
 
         val timeoutEnd = if(timeout == null) now else now + timeout
         // Early elimination without waiting for locks
@@ -159,18 +158,20 @@ public interface RateLimiter {
 @OptIn(ExperimentalTime::class)
 public fun rateLimiter(eventsPerInterval: Int, interval:Duration): RateLimiter = RateLimiterImpl(eventsPerInterval,interval)
 
-private const val MAX_ALLOWED: Double = 1_000_000_000.0
-private const val MIN_ALLOWED: Double = 0.0000001
-
 @OptIn(ExperimentalTime::class)
-internal class RateLimiterImpl(eventsPerInterval: Int, interval: Duration) : RateLimiter {
+internal class RateLimiterImpl(
+    eventsPerInterval: Int,
+    interval: Duration,
+    val timeSource: () -> LongTimeMark = { LongTimeSource.markNow() },
+    val delay: suspend (Long) -> Unit = { kotlinx.coroutines.delay(it) }
+) : RateLimiter {
 
     private val mutex = Mutex()
     private val _interval = Duration.nanoseconds(interval.inWholeNanoseconds)
     private val permitDuration = _interval.div(eventsPerInterval)
 
     @Volatile
-    private var cursor: LongTimeMark = LongTimeSource.markNow()
+    private var cursor: LongTimeMark = timeSource()
 
     init {
         require(interval.inWholeMilliseconds > 5) {
@@ -193,7 +194,7 @@ internal class RateLimiterImpl(eventsPerInterval: Int, interval: Duration) : Rat
     }
 
     private suspend fun acquireDelay(permitDuration: Duration): Long {
-        val now: LongTimeMark = LongTimeSource.markNow()
+        val now: LongTimeMark = timeSource()
         val wakeUpTime: LongTimeMark = mutex.withLock {
             val base = if (cursor > now) cursor else now
             cursor = base + permitDuration
