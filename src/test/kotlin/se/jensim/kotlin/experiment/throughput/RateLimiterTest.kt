@@ -11,7 +11,6 @@ import org.junit.runners.Parameterized.Parameters
 import se.jensim.kotlin.experiment.time.Delayer
 import se.jensim.kotlin.experiment.time.TestLongTimeSource
 
-
 @RunWith(Parameterized::class)
 @OptIn(ExperimentalTime::class)
 class RateLimiterTest(private val eventsPerInterval: Int) {
