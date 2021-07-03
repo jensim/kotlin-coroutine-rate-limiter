@@ -7,6 +7,7 @@ import kotlinx.coroutines.runBlocking
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.junit.runners.Parameterized
+import org.junit.runners.Parameterized.Parameters
 import se.jensim.kotlin.experiment.time.Delayer
 import se.jensim.kotlin.experiment.time.TestLongTimeSource
 
@@ -19,12 +20,12 @@ class IntervalLimiterTest(
     companion object {
 
         @JvmStatic
-        @Parameterized.Parameters
+        @Parameters(name="{0} events per interval")
         fun data(): Collection<Array<Any>> = listOf(1, 3, 10, 100, 1000).map { arrayOf(it) }
     }
 
     @Test
-    fun run_for_one_second(): Unit = runBlocking {
+    fun run_for_several_intervals(): Unit = runBlocking {
         val timeSource = TestLongTimeSource()
         val delayer = Delayer()
         val intervalLimiter: IntervalLimiter = IntervalLimiterImpl(
@@ -33,11 +34,15 @@ class IntervalLimiterTest(
             timeSource = timeSource::markNow,
             delay = delayer::delay
         )
-        (1..eventsPerInterval).forEach {
+        val laps = 10
+        var pokes = 0
+        (0 until eventsPerInterval* laps).forEach { idx ->
+            pokes++
+            delayer.reset()
             intervalLimiter.acquire()
-            assertEquals(0, delayer.getDelay(), "Permit #$it for $eventsPerInterval events should not be delayed")
+            val delay:Long = (idx / eventsPerInterval) * 1000L
+            assertEquals(delay, delayer.getDelay(), "Permit #${idx} for $eventsPerInterval events/interval should be delayed $delay ms")
         }
-        intervalLimiter.acquire()
-        assertEquals(1000, delayer.getDelay(),"Last permit (${eventsPerInterval+1}) should be delayed")
+        assertEquals(eventsPerInterval* laps, pokes, "The test is wrong, wrong number of iterations")
     }
 }

@@ -50,10 +50,10 @@ internal class IntervalLimiterImpl(
     private var intervalStartCursor: LongTimeMark = timeSource()
 
     @Volatile
-    private var cursor: LongTimeMark = intervalStartCursor.minus(eventSegment)
+    private var cursor: LongTimeMark = intervalStartCursor + eventSegment
 
     @Volatile
-    private var intervalEndCursor: LongTimeMark = intervalStartCursor.plus(_interval)
+    private var intervalEndCursor: LongTimeMark = intervalStartCursor + _interval
 
     override suspend fun acquire(): Long = acquire(permits = 1)
     override suspend fun acquire(permits: Int): Long {
@@ -116,23 +116,32 @@ internal class IntervalLimiterImpl(
             intervalEndCursor = now + _interval
             cursor = intervalStartCursor + permitDuration
             // No delay
+            // println("Settign up")
             now
         } else if (cursor > intervalEndCursor) {
             // Cursor has moved into new interval
             // Move cursors to match new interval
-            intervalStartCursor = intervalEndCursor
-            intervalEndCursor += _interval
-            cursor = intervalStartCursor + permitDuration
+            val cursorDiff = cursor - intervalEndCursor
+            var intervalSteps:Int = (cursorDiff.inWholeNanoseconds / _interval.inWholeNanoseconds).toInt()
+            if(cursorDiff.inWholeNanoseconds % _interval.inWholeNanoseconds > 9) intervalSteps++
+            val displacement = _interval.times(intervalSteps)
+
+            intervalEndCursor += displacement
+            intervalStartCursor += displacement
+            cursor += permitDuration
+            // println("Cursor beyond interval, moving interval $intervalSteps steps")
             intervalStartCursor
         } else if (intervalStartCursor > now) {
             // Active interval is in the future, and the current permit must be delayed
             cursor += permitDuration
+            // println("Cursor in future interval")
             intervalStartCursor
         } else {
             // Now and Cursor are within the active interval
             // Only need to move the Cursor, nothing else
             // No delay
             cursor += permitDuration
+            // println("Nothing special - cursor in first interval")
             now
         }
     }
