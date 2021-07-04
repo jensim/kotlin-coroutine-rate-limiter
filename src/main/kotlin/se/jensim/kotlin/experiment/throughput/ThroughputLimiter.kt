@@ -226,7 +226,7 @@ internal class IntervalLimiterImpl(
 }
 
 /**
- * Limit throughput of events per second to be at most equal to the argument eventsPerSecond.
+ * Limit throughput of events per second to be at most equal to the argument eventsPerInterval.
  * When the limit is passed, calls are suspended until the calculated point in time when it's
  * okay to pass the rate limiter.
  */

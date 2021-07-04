@@ -18,7 +18,7 @@ class RateLimiterTest(private val eventsPerInterval: Int) {
     companion object {
 
         @JvmStatic
-        @Parameters(name="{0} events per second")
+        @Parameters(name="{0} events per interval")
         fun data(): Collection<Array<Any>> = listOf(1, 3, 10, 100, 1000).map { arrayOf(it) }
     }
 
